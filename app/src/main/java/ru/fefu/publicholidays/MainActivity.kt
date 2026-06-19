@@ -8,15 +8,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import ru.fefu.publicholidays.ui.navigation.HolidaysNavGraph
 import ru.fefu.publicholidays.ui.theme.PublicHolidaysTheme
+import ru.fefu.publicholidays.ui.viewmodel.MainViewModel
 import ru.fefu.publicholidays.ui.viewmodel.ThemeViewModel
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val themeViewModel: ThemeViewModel by viewModels()
+    private val mainViewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        mainViewModel
+
         setContent {
             val isDarkTheme = themeViewModel.isDarkTheme.collectAsStateWithLifecycle()
 

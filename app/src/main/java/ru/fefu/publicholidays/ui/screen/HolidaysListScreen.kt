@@ -136,7 +136,10 @@ fun HolidaysListScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(bottom = 16.dp)
                             ) {
-                                items(state.data) { holiday ->
+                                items(
+                                    items = state.data,
+                                    key = { holiday -> holiday.id }
+                                ) { holiday ->
                                     val isFav = state.favourites.contains(holiday.id)
 
                                     Card(

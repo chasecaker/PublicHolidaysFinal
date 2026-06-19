@@ -30,17 +30,6 @@ class SettingsViewModel @Inject constructor(
                 repository.currentUserId,
                 repository.isDarkThemeEnabled
             ) { users, currentUserId, isDarkTheme ->
-                if (users.isEmpty()) {
-                    val defaultUser = UserEntity(
-                        userId = UUID.randomUUID().toString(),
-                        name = "Основной профиль",
-                        defaultCountryCode = "RU"
-                    )
-
-                    repository.createUser(defaultUser)
-                    repository.switchUser(defaultUser.userId)
-                }
-
                 SettingsUiState(
                     users = users,
                     currentUserId = currentUserId,
@@ -66,7 +55,9 @@ class SettingsViewModel @Inject constructor(
         val name = _uiState.value.newUserName.trim()
         val country = _uiState.value.newUserCountry.trim().uppercase()
 
-        if (name.isEmpty() || country.isEmpty()) return
+        if (name.isEmpty() || country.length != 2 || !country.all { it.isLetter() }) {
+            return
+        }
 
         viewModelScope.launch {
             val newUser = UserEntity(
@@ -78,12 +69,6 @@ class SettingsViewModel @Inject constructor(
             repository.createUser(newUser)
             repository.switchUser(newUser.userId)
 
-            _uiState.update {
-                it.copy(
-                    newUserName = "",
-                    newUserCountry = "RU"
-                )
-            }
         }
     }
 

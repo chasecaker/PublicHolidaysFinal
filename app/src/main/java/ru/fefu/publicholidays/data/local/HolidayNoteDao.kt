@@ -13,15 +13,13 @@ interface HolidayNoteDao {
         """
         SELECT * FROM holiday_notes
         WHERE userId = :userId
-        AND holidayDate = :holidayDate
-        AND countryCode = :countryCode
+        AND holidayId = :holidayId
         LIMIT 1
         """
     )
     fun getNoteByUserAndHoliday(
         userId: String,
-        holidayDate: String,
-        countryCode: String
+        holidayId: String
     ): Flow<HolidayNoteEntity?>
 
     @Query(
@@ -39,21 +37,19 @@ interface HolidayNoteDao {
         """
         DELETE FROM holiday_notes
         WHERE userId = :userId
-        AND holidayDate = :holidayDate
-        AND countryCode = :countryCode
+        AND holidayId = :holidayId
         """
     )
     suspend fun deleteNoteByUserAndHoliday(
         userId: String,
-        holidayDate: String,
-        countryCode: String
+        holidayId: String
     )
 
     @Query(
         """
-    DELETE FROM holiday_notes
-    WHERE userId = :userId
-    """
+        DELETE FROM holiday_notes
+        WHERE userId = :userId
+        """
     )
     suspend fun deleteAllNotesByUser(userId: String)
 }

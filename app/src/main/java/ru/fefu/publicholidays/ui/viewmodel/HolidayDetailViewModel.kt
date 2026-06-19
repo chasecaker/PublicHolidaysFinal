@@ -1,16 +1,11 @@
 package ru.fefu.publicholidays.ui.viewmodel
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import ru.fefu.publicholidays.data.model.PublicHolidayDto
 import ru.fefu.publicholidays.data.repository.HolidaysRepository
@@ -26,93 +21,76 @@ class HolidayDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    var uiState: HolidayDetailUiState by mutableStateOf(HolidayDetailUiState.Loading)
-        private set
-
     private val holidayId: String = savedStateHandle.get<String>(Routes.ARG_ID).orEmpty()
-
-    init {
-        if (holidayId.isNotBlank()) {
-            loadHoliday()
-        } else {
-            uiState = HolidayDetailUiState.NotFound
-        }
-    }
+    private val reloadTrigger = MutableStateFlow(0)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun loadHoliday() {
-        if (holidayId.isBlank()) {
-            uiState = HolidayDetailUiState.NotFound
-            return
-        }
+    val uiState: StateFlow<HolidayDetailUiState> = combine(
+        reloadTrigger,
+        repository.currentUserId
+    ) { _, currentUserId ->
+        currentUserId
+    }
+        .flatMapLatest { currentUserId ->
+            val parsedId = parseHolidayId(holidayId)
 
-        val parsedId = parseHolidayId(holidayId)
-        if (parsedId == null) {
-            uiState = HolidayDetailUiState.NotFound
-            return
-        }
+            if (currentUserId == null || parsedId == null) {
+                return@flatMapLatest flowOf<HolidayDetailUiState>(HolidayDetailUiState.NotFound)
+            }
 
-        uiState = HolidayDetailUiState.Loading
+            flow<HolidayDetailUiState> {
+                emit(HolidayDetailUiState.Loading)
+                try {
+                    val holiday = repository.getHolidayDetails(
+                        year = parsedId.year,
+                        countryCode = parsedId.countryCode,
+                        holidayDate = parsedId.date,
+                        name = parsedId.name
+                    )
 
-        viewModelScope.launch {
-            try {
-                val holiday = repository.getHolidayDetails(
-                    year = parsedId.year,
-                    countryCode = parsedId.countryCode,
-                    holidayDate = parsedId.date,
-                    name = parsedId.name
-                )
+                    if (holiday == null) {
+                        emit(HolidayDetailUiState.NotFound)
+                        return@flow
+                    }
 
-                if (holiday == null) {
-                    uiState = HolidayDetailUiState.NotFound
-                    return@launch
-                }
+                    repository.addHistoryEntry(currentUserId, holiday)
 
-                val userId = repository.currentUserId.first()
-
-                if (userId != null) {
-                    repository.addHistoryEntry(userId, holiday)
-                }
-
-                repository.currentUserId
-                    .flatMapLatest { currentUserId ->
-                        if (currentUserId != null) {
-                            repository.getNote(
-                                userId = currentUserId,
-                                holidayDate = holiday.date,
-                                countryCode = holiday.countryCode
+                    val notesFlow = repository.getNote(currentUserId, holidayId)
+                        .map { noteEntity ->
+                            HolidayDetailUiState.Success(
+                                holiday = holiday.toUi(),
+                                noteText = noteEntity?.noteText.orEmpty()
                             )
-                        } else {
-                            flowOf(null)
                         }
-                    }
-                    .collect { noteEntity ->
-                        uiState = HolidayDetailUiState.Success(
-                            holiday = holiday.toUi(),
-                            noteText = noteEntity?.noteText.orEmpty()
-                        )
-                    }
-            } catch (e: Exception) {
-                uiState = HolidayDetailUiState.Error(
-                    e.localizedMessage ?: "Ошибка загрузки праздника"
-                )
+
+                    emitAll(notesFlow)
+
+                } catch (e: Exception) {
+                    emit(HolidayDetailUiState.Error(e.localizedMessage ?: "Ошибка загрузки"))
+                }
             }
         }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = HolidayDetailUiState.Loading
+        )
+
+    fun loadHoliday() {
+        reloadTrigger.value += 1
     }
 
     fun saveNote(text: String) {
-        val currentState = uiState
+        val currentState = uiState.value
         if (currentState is HolidayDetailUiState.Success) {
             viewModelScope.launch {
-                val userId = repository.currentUserId.first()
-                if (userId != null) {
-                    repository.saveNote(
-                        userId = userId,
-                        holidayDate = currentState.holiday.date,
-                        countryCode = currentState.holiday.countryCode,
-                        text = text
-                    )
-                }
+                val userId = repository.currentUserId.filterNotNull().first()
+
+                repository.saveNote(
+                    userId = userId,
+                    holidayId = holidayId,
+                    text = text
+                )
             }
         }
     }
@@ -120,35 +98,15 @@ class HolidayDetailViewModel @Inject constructor(
     private fun parseHolidayId(id: String): ParsedHolidayId? {
         val parts = id.split("|", limit = 3)
         if (parts.size != 3) return null
-
-        val date = parts[0]
-        val countryCode = parts[1]
-        val name = parts[2]
-        val year = runCatching { LocalDate.parse(date).year }.getOrNull() ?: return null
-
-        return ParsedHolidayId(
-            date = date,
-            countryCode = countryCode,
-            name = name,
-            year = year
-        )
+        val year = runCatching { LocalDate.parse(parts[0]).year }.getOrNull() ?: return null
+        return ParsedHolidayId(parts[0], parts[1], parts[2], year)
     }
 
     private fun PublicHolidayDto.toUi() = HolidayUi(
         id = "$date|$countryCode|$name",
-        date = date,
-        localName = localName,
-        name = name,
-        countryCode = countryCode,
-        fixed = fixed,
-        global = global,
-        types = types
+        date = date, localName = localName, name = name,
+        countryCode = countryCode, fixed = fixed, global = global, types = types
     )
 
-    private data class ParsedHolidayId(
-        val date: String,
-        val countryCode: String,
-        val name: String,
-        val year: Int
-    )
+    private data class ParsedHolidayId(val date: String, val countryCode: String, val name: String, val year: Int)
 }

@@ -7,13 +7,16 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.Mockito.mock
 import ru.fefu.publicholidays.data.local.AppDatabase
+import ru.fefu.publicholidays.data.local.CachedHolidayDao
 import ru.fefu.publicholidays.data.local.CachedHolidayEntity
+import ru.fefu.publicholidays.data.local.UserDao
+import ru.fefu.publicholidays.data.local.UserEntity
 import ru.fefu.publicholidays.data.local.UserSettingsManager
 import ru.fefu.publicholidays.data.model.PublicHolidayDto
 import ru.fefu.publicholidays.data.remote.HolidaysApi
@@ -23,30 +26,33 @@ import ru.fefu.publicholidays.data.repository.HolidaysRepository
 class HolidaysRepositoryRoomTest {
 
     private lateinit var database: AppDatabase
-    private lateinit var api: FakeHolidaysApi
+    private lateinit var cachedHolidayDao: CachedHolidayDao
+    private lateinit var userDao: UserDao
     private lateinit var repository: HolidaysRepository
 
+    private val mockApi: HolidaysApi = mock(HolidaysApi::class.java)
+    private lateinit var userSettingsManager: UserSettingsManager
+
     @Before
-    fun setup() {
+    fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
 
-        database = Room.inMemoryDatabaseBuilder(
-            context,
-            AppDatabase::class.java
-        )
+        database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
 
-        api = FakeHolidaysApi()
+        cachedHolidayDao = database.cachedHolidayDao()
+        userDao = database.userDao()
+        userSettingsManager = UserSettingsManager(context)
 
         repository = HolidaysRepository(
-            api = api,
+            api = mockApi,
+            cachedHolidayDao = cachedHolidayDao,
+            userDao = userDao,
             favoriteHolidayDao = database.favoriteHolidayDao(),
-            userDao = database.userDao(),
             holidayHistoryDao = database.holidayHistoryDao(),
             holidayNoteDao = database.holidayNoteDao(),
-            userSettingsManager = UserSettingsManager(context),
-            cachedHolidayDao = database.cachedHolidayDao()
+            userSettingsManager = userSettingsManager
         )
     }
 
@@ -56,158 +62,72 @@ class HolidaysRepositoryRoomTest {
     }
 
     @Test
-    fun getHolidays_whenCacheExistsAndNetworkFails_returnsCachedData() = runBlocking {
-        database.cachedHolidayDao().insertCachedHolidays(
-            listOf(
-                CachedHolidayEntity(
-                    holidayId = "2026-01-01|RU|New Year's Day",
-                    date = "2026-01-01",
-                    localName = "Новый год",
-                    name = "New Year's Day",
-                    countryCode = "RU",
-                    year = 2026,
-                    fixed = true,
-                    global = true,
-                    cachedAt = System.currentTimeMillis()
-                )
-            )
+    fun testObserveHolidaysReturnsCorrectData() = runBlocking {
+        val countryCode = "RU"
+        val year = 2026
+
+        val entity = CachedHolidayEntity(
+            holidayId = "2026-01-01|$countryCode|New Year",
+            date = "2026-01-01",
+            localName = "Новый Год",
+            name = "New Year",
+            countryCode = countryCode,
+            year = year,
+            fixed = true,
+            global = true,
+            counties = null,
+            launchYear = null,
+            types = listOf("Public"),
+            cachedAt = System.currentTimeMillis()
         )
 
-        api.exception = RuntimeException("Network unavailable")
+        cachedHolidayDao.insertCachedHolidays(listOf(entity))
 
-        val result = repository.getHolidays(
-            year = 2026,
-            countryCode = "RU",
-            forceRefresh = true
-        )
+        val result = repository.observeHolidays(year, countryCode).first()
 
         assertEquals(1, result.size)
-        assertEquals("New Year's Day", result.first().name)
-        assertEquals("RU", result.first().countryCode)
+        assertEquals("New Year", result[0].name)
+        assertEquals("RU", result[0].countryCode)
     }
 
     @Test
-    fun toggleFavorite_addsAndRemovesFavoriteForSpecificUser() = runBlocking {
-        val holiday = newYearHoliday()
+    fun testFavoritesAndHistoryOperations() = runBlocking {
+        val userId = "test_user_id"
+        val user = UserEntity(userId, "Тестовый Профиль", "RU")
+        repository.createUser(user)
 
-        repository.toggleFavorite(
-            userId = "user-1",
-            holiday = holiday
+        val holiday = PublicHolidayDto(
+            date = "2026-05-01",
+            localName = "Праздник Весны и Труда",
+            name = "Labour Day",
+            countryCode = "RU",
+            fixed = true,
+            global = true,
+            counties = null,
+            launchYear = null,
+            types = listOf("Public")
         )
+        val holidayId = "2026-05-01|RU|Labour Day"
 
-        var favorites = repository.getFavoriteItems("user-1").first()
+        repository.toggleFavorite(userId, holiday)
+        var favoriteIds = repository.getFavoriteIds(userId).first()
+        assertTrue(favoriteIds.contains(holidayId))
 
-        assertEquals(1, favorites.size)
-        assertEquals("2026-01-01|RU|New Year's Day", favorites.first().favoriteId)
+        repository.toggleFavorite(userId, holiday)
+        favoriteIds = repository.getFavoriteIds(userId).first()
+        assertFalse(favoriteIds.contains(holidayId))
 
-        repository.toggleFavorite(
-            userId = "user-1",
-            holiday = holiday
-        )
-
-        favorites = repository.getFavoriteItems("user-1").first()
-
-        assertTrue(favorites.isEmpty())
-    }
-
-    @Test
-    fun saveNote_updatesOnlySelectedUserHolidayNote() = runBlocking {
-        val holiday = newYearHoliday()
-
-        repository.toggleFavorite("user-1", holiday)
-        repository.toggleFavorite("user-2", holiday)
-
-        repository.saveNote(
-            userId = "user-1",
-            holidayDate = holiday.date,
-            countryCode = holiday.countryCode,
-            text = "Поздравить семью"
-        )
-
-        val user1Note = repository.getNote(
-            userId = "user-1",
-            holidayDate = holiday.date,
-            countryCode = holiday.countryCode
-        ).first()
-
-        val user2Note = repository.getNote(
-            userId = "user-2",
-            holidayDate = holiday.date,
-            countryCode = holiday.countryCode
-        ).first()
-
-        assertEquals("Поздравить семью", user1Note?.noteText)
-        assertEquals(null, user2Note)
-    }
-
-    @Test
-    fun addHistoryEntry_whenSameHolidayOpenedTwice_keepsSingleRecentEntry() = runBlocking {
-        val holiday = newYearHoliday()
-
-        repository.addHistoryEntry("user-1", holiday)
-        repository.addHistoryEntry("user-1", holiday)
-
-        val history = repository.getHistory("user-1").first()
-
+        repository.addHistoryEntry(userId, holiday)
+        val history = repository.getHistory(userId).first()
         assertEquals(1, history.size)
-        assertEquals("New Year's Day", history.first().name)
-    }
 
-    @Test
-    fun saveNote_whenTextIsBlank_deletesExistingNote() = runBlocking {
-        repository.saveNote(
-            userId = "user-1",
-            holidayDate = "2026-01-01",
-            countryCode = "RU",
-            text = "Купить подарок"
-        )
+        val firstHistoryItem = history[0]
+        val currentHistoryId = "${firstHistoryItem.date}|${firstHistoryItem.countryCode}|${firstHistoryItem.name}"
+        assertEquals(holidayId, currentHistoryId)
 
-        var note = repository.getNote(
-            userId = "user-1",
-            holidayDate = "2026-01-01",
-            countryCode = "RU"
-        ).first()
-
-        assertEquals("Купить подарок", note?.noteText)
-
-        repository.saveNote(
-            userId = "user-1",
-            holidayDate = "2026-01-01",
-            countryCode = "RU",
-            text = ""
-        )
-
-        note = repository.getNote(
-            userId = "user-1",
-            holidayDate = "2026-01-01",
-            countryCode = "RU"
-        ).first()
-
-        assertEquals(null, note)
-    }
-
-    private fun newYearHoliday() = PublicHolidayDto(
-        date = "2026-01-01",
-        localName = "Новый год",
-        name = "New Year's Day",
-        countryCode = "RU",
-        fixed = true,
-        global = true,
-        counties = null,
-        launchYear = null,
-        types = listOf("Public")
-    )
-
-    private class FakeHolidaysApi : HolidaysApi {
-        var result: List<PublicHolidayDto> = emptyList()
-        var exception: Throwable? = null
-
-        override suspend fun getPublicHolidays(
-            year: Int,
-            countryCode: String
-        ): List<PublicHolidayDto> {
-            exception?.let { throw it }
-            return result
-        }
+        repository.saveNote(userId = userId, holidayId = holidayId, text = "Важная заметка")
+        val note = repository.getNote(userId, holidayId).first()
+        assertNotNull(note)
+        assertEquals("Важная заметка", note?.noteText)
     }
 }

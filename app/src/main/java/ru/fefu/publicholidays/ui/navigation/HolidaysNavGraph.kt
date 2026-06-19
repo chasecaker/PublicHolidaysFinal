@@ -76,8 +76,10 @@ fun HolidaysNavGraph() {
         ) {
             val detailViewModel: HolidayDetailViewModel = hiltViewModel()
 
+            val state by detailViewModel.uiState.collectAsStateWithLifecycle()
+
             HolidayDetailScreen(
-                state = detailViewModel.uiState,
+                state = state,
                 onBack = { navController.popBackStack() },
                 onRetry = { detailViewModel.loadHoliday() },
                 onNoteChanged = { text -> detailViewModel.saveNote(text) }
@@ -86,10 +88,12 @@ fun HolidaysNavGraph() {
 
         composable(Routes.HISTORY) {
             val historyViewModel: HistoryViewModel = hiltViewModel()
+            val historyState by historyViewModel.uiState.collectAsStateWithLifecycle()
 
             HistoryScreen(
+                uiState = historyState,
                 onBackClick = { navController.popBackStack() },
-                viewModel = historyViewModel
+                onClearHistoryClick = { historyViewModel.clearHistory() }
             )
         }
 

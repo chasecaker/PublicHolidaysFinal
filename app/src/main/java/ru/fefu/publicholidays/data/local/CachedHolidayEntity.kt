@@ -14,5 +14,8 @@ data class CachedHolidayEntity(
     val year: Int,
     val fixed: Boolean,
     val global: Boolean,
+    val counties: List<String>?,
+    val launchYear: Int?,
+    val types: List<String>,
     val cachedAt: Long
 )

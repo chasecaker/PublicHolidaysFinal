@@ -1,5 +1,6 @@
 package ru.fefu.publicholidays.data.repository
 
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import ru.fefu.publicholidays.data.local.CachedHolidayDao
@@ -19,6 +20,8 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
+import java.util.UUID
 
 @Singleton
 class HolidaysRepository @Inject constructor(
@@ -37,6 +40,23 @@ class HolidaysRepository @Inject constructor(
     }
 
     val currentUserId: Flow<String?> = userSettingsManager.currentUserId
+        .onEach { userId ->
+            if (userId == null) {
+                val users = userDao.getAllUsers().first()
+                if (users.isEmpty()) {
+                    val defaultUserId = UUID.randomUUID().toString()
+                    val defaultUser = UserEntity(
+                        userId = defaultUserId,
+                        name = "Основной профиль",
+                        defaultCountryCode = "RU"
+                    )
+                    userDao.insertUser(defaultUser)
+                    userSettingsManager.setCurrentUserId(defaultUserId)
+                } else {
+                    userSettingsManager.setCurrentUserId(users.first().userId)
+                }
+            }
+        }
     val isDarkThemeEnabled: Flow<Boolean> = userSettingsManager.isDarkThemeEnabled
 
     suspend fun switchUser(userId: String?) {
@@ -49,35 +69,40 @@ class HolidaysRepository @Inject constructor(
 
     fun getAllUsers(): Flow<List<UserEntity>> = userDao.getAllUsers()
 
-    suspend fun createUser(user: UserEntity) =
-        userDao.insertUser(user)
+    suspend fun createUser(user: UserEntity) = userDao.insertUser(user)
 
     suspend fun deleteUserCompletely(userId: String) {
         favoriteHolidayDao.deleteAllFavoritesByUser(userId)
         holidayHistoryDao.clearHistoryByUser(userId)
         holidayNoteDao.deleteAllNotesByUser(userId)
-
         userDao.deleteUser(userId)
 
         if (currentUserId.first() == userId) {
             val nextUser = userDao.getAllUsers().first().firstOrNull()
-
             switchUser(nextUser?.userId)
         }
     }
 
-    suspend fun getHolidays(
+    fun observeHolidays(
+        year: Int,
+        countryCode: String
+    ): Flow<List<PublicHolidayDto>> {
+        return cachedHolidayDao.observeCachedHolidays(countryCode, year)
+            .map { list -> list.map { it.toCachedDto() } }
+    }
+
+    suspend fun syncHolidays(
         year: Int,
         countryCode: String,
         forceRefresh: Boolean = false
-    ): List<PublicHolidayDto> {
+    ) {
         val cached = cachedHolidayDao.getCachedHolidays(countryCode, year)
 
         if (!forceRefresh && cached.isNotEmpty() && isCacheFresh(countryCode, year)) {
-            return cached.map { it.toCachedDto() }
+            return
         }
 
-        return try {
+        try {
             val remote = api.getPublicHolidays(year, countryCode)
 
             if (remote.isNotEmpty()) {
@@ -92,6 +117,9 @@ class HolidaysRepository @Inject constructor(
                         year = year,
                         fixed = dto.fixed,
                         global = dto.global,
+                        counties = dto.counties,
+                        launchYear = dto.launchYear,
+                        types = dto.types,
                         cachedAt = now
                     )
                 }
@@ -99,12 +127,8 @@ class HolidaysRepository @Inject constructor(
                 cachedHolidayDao.clearCache(countryCode, year)
                 cachedHolidayDao.insertCachedHolidays(entities)
             }
-
-            remote
         } catch (e: Exception) {
-            if (cached.isNotEmpty()) {
-                cached.map { it.toCachedDto() }
-            } else {
+            if (cached.isEmpty()) {
                 throw e
             }
         }
@@ -116,44 +140,25 @@ class HolidaysRepository @Inject constructor(
         holidayDate: String,
         name: String
     ): PublicHolidayDto? {
-        val cached = cachedHolidayDao.getCachedHoliday(
-            countryCode = countryCode,
-            year = year,
-            holidayDate = holidayDate,
-            name = name
-        )
+        val cached = cachedHolidayDao.getCachedHoliday(countryCode, year, holidayDate, name)
+        if (cached != null) return cached.toCachedDto()
 
-        if (cached != null) {
-            return cached.toCachedDto()
+        try {
+            syncHolidays(year, countryCode, forceRefresh = false)
+        } catch (e: Exception) {
+            Log.w("HolidaysRepository", "Не удалось выполнить фоновую синхронизацию праздников", e)
         }
 
-        return getHolidays(
-            year = year,
-            countryCode = countryCode,
-            forceRefresh = false
-        ).find { holiday ->
-            holiday.date == holidayDate && holiday.name == name
-        }
+        return cachedHolidayDao.getCachedHoliday(countryCode, year, holidayDate, name)?.toCachedDto()
     }
 
-    fun getFavorites(userId: String): Flow<List<PublicHolidayDto>> {
-        return favoriteHolidayDao.getFavoritesByUser(userId)
-            .map { list -> list.map { it.toFavoriteDto() } }
-    }
+    fun getFavoriteIds(userId: String): Flow<Set<String>> =
+        favoriteHolidayDao.getFavoriteIdsByUser(userId).map { it.toSet() }
 
-    fun getFavoriteIds(userId: String): Flow<Set<String>> {
-        return favoriteHolidayDao.getFavoriteIdsByUser(userId)
-            .map { ids -> ids.toSet() }
-    }
+    fun getFavoriteItems(userId: String): Flow<List<FavoriteHolidayEntity>> =
+        favoriteHolidayDao.getFavoritesByUser(userId)
 
-    fun getFavoriteItems(userId: String): Flow<List<FavoriteHolidayEntity>> {
-        return favoriteHolidayDao.getFavoritesByUser(userId)
-    }
-
-    suspend fun toggleFavorite(
-        userId: String,
-        holiday: PublicHolidayDto
-    ) {
+    suspend fun toggleFavorite(userId: String, holiday: PublicHolidayDto) {
         val favoriteId = holiday.toHolidayId()
         val exists = favoriteHolidayDao.isFavoriteByUser(userId, favoriteId)
 
@@ -170,6 +175,9 @@ class HolidaysRepository @Inject constructor(
                     countryCode = holiday.countryCode,
                     fixed = holiday.fixed,
                     global = holiday.global,
+                    counties = holiday.counties,
+                    launchYear = holiday.launchYear,
+                    types = holiday.types,
                     favoriteNote = "",
                     addedAt = System.currentTimeMillis()
                 )
@@ -177,79 +185,41 @@ class HolidaysRepository @Inject constructor(
         }
     }
 
-    fun getHistory(userId: String): Flow<List<HolidayHistoryEntity>> {
-        return holidayHistoryDao.getHistoryByUser(
-            userId = userId,
-            limit = HISTORY_LIMIT
-        )
-    }
+    fun getHistory(userId: String): Flow<List<HolidayHistoryEntity>> =
+        holidayHistoryDao.getHistoryByUser(userId, HISTORY_LIMIT)
 
-    suspend fun addHistoryEntry(
-        userId: String,
-        holiday: PublicHolidayDto
-    ) {
+    suspend fun addHistoryEntry(userId: String, holiday: PublicHolidayDto) {
         holidayHistoryDao.deleteDuplicateHistoryEntry(
-            userId = userId,
-            date = holiday.date,
-            countryCode = holiday.countryCode,
-            name = holiday.name
+            userId = userId, date = holiday.date,
+            countryCode = holiday.countryCode, name = holiday.name
         )
-
         holidayHistoryDao.insertHistoryEntry(
             HolidayHistoryEntity(
-                userId = userId,
-                date = holiday.date,
-                countryCode = holiday.countryCode,
-                name = holiday.name,
-                localName = holiday.localName,
-                timestamp = System.currentTimeMillis()
+                userId = userId, date = holiday.date,
+                countryCode = holiday.countryCode, name = holiday.name,
+                localName = holiday.localName, timestamp = System.currentTimeMillis()
             )
         )
-
-        holidayHistoryDao.trimHistory(
-            userId = userId,
-            limit = HISTORY_LIMIT
-        )
+        holidayHistoryDao.trimHistory(userId, HISTORY_LIMIT)
     }
 
-    suspend fun clearHistory(userId: String) {
-        holidayHistoryDao.clearHistoryByUser(userId)
+    suspend fun clearHistory(userId: String) = holidayHistoryDao.clearHistoryByUser(userId)
+
+    fun getNote(userId: String, holidayId: String): Flow<HolidayNoteEntity?> {
+        return holidayNoteDao.getNoteByUserAndHoliday(userId, holidayId)
     }
 
-    fun getNote(
-        userId: String,
-        holidayDate: String,
-        countryCode: String
-    ): Flow<HolidayNoteEntity?> {
-        return holidayNoteDao.getNoteByUserAndHoliday(
-            userId = userId,
-            holidayDate = holidayDate,
-            countryCode = countryCode
-        )
-    }
+    fun getNotesByUser(userId: String): Flow<List<HolidayNoteEntity>> =
+        holidayNoteDao.getNotesByUser(userId)
 
-    fun getNotesByUser(userId: String): Flow<List<HolidayNoteEntity>> {
-        return holidayNoteDao.getNotesByUser(userId)
-    }
-
-    suspend fun saveNote(
-        userId: String,
-        holidayDate: String,
-        countryCode: String,
-        text: String
-    ) {
+    suspend fun saveNote(userId: String, holidayId: String, text: String) {
         if (text.isBlank()) {
-            holidayNoteDao.deleteNoteByUserAndHoliday(
-                userId = userId,
-                holidayDate = holidayDate,
-                countryCode = countryCode
-            )
+            holidayNoteDao.deleteNoteByUserAndHoliday(userId, holidayId)
         } else {
             holidayNoteDao.insertNote(
                 HolidayNoteEntity(
                     userId = userId,
-                    holidayDate = holidayDate,
-                    countryCode = countryCode,
+                    holidayId = holidayId,
                     noteText = text,
                     updatedAt = System.currentTimeMillis()
                 )
@@ -257,43 +227,16 @@ class HolidaysRepository @Inject constructor(
         }
     }
 
-    private suspend fun isCacheFresh(
-        countryCode: String,
-        year: Int
-    ): Boolean {
-        val lastUpdate = cachedHolidayDao.getLastCacheUpdateTime(
-            countryCode = countryCode,
-            year = year
-        ) ?: return false
-
+    private suspend fun isCacheFresh(countryCode: String, year: Int): Boolean {
+        val lastUpdate = cachedHolidayDao.getLastCacheUpdateTime(countryCode, year) ?: return false
         return System.currentTimeMillis() - lastUpdate <= CACHE_TTL_MILLIS
     }
 
-    private fun PublicHolidayDto.toHolidayId(): String {
-        return "$date|$countryCode|$name"
-    }
+    private fun PublicHolidayDto.toHolidayId(): String = "$date|$countryCode|$name"
 
     private fun CachedHolidayEntity.toCachedDto() = PublicHolidayDto(
-        date = date,
-        localName = localName,
-        name = name,
-        countryCode = countryCode,
-        fixed = fixed,
-        global = global,
-        counties = null,
-        launchYear = null,
-        types = emptyList()
-    )
-
-    private fun FavoriteHolidayEntity.toFavoriteDto() = PublicHolidayDto(
-        date = date,
-        localName = localName,
-        name = name,
-        countryCode = countryCode,
-        fixed = fixed,
-        global = global,
-        counties = null,
-        launchYear = null,
-        types = emptyList()
+        date = date, localName = localName, name = name,
+        countryCode = countryCode, fixed = fixed, global = global,
+        counties = counties, launchYear = launchYear, types = types
     )
 }

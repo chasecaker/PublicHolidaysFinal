@@ -15,6 +15,9 @@ data class FavoriteHolidayEntity(
     val countryCode: String,
     val fixed: Boolean,
     val global: Boolean,
+    val counties: List<String>?,
+    val launchYear: Int?,
+    val types: List<String>,
     val favoriteNote: String = "",
     val addedAt: Long = System.currentTimeMillis()
 )

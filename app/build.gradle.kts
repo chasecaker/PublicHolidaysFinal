@@ -17,7 +17,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "ru.fefu.publicholidays.CustomTestRunner"
     }
 
     buildTypes {
@@ -36,13 +36,13 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+
     buildFeatures {
         compose = true
     }
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -51,6 +51,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -58,6 +59,7 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
@@ -69,7 +71,6 @@ dependencies {
 
     implementation(libs.google.hilt.android)
     ksp(libs.google.hilt.compiler)
-
     implementation(libs.androidx.hilt.navigation.compose)
 
     implementation(libs.androidx.room.runtime)
@@ -88,8 +89,11 @@ dependencies {
     implementation("androidx.hilt:hilt-work:1.2.0")
     ksp("androidx.hilt:hilt-compiler:1.2.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-
     androidTestImplementation("androidx.work:work-testing:2.9.0")
 
+    androidTestImplementation("com.google.dagger:hilt-android-testing:2.56.2")
+    kspAndroidTest(libs.google.hilt.compiler)
 
+    androidTestImplementation("org.mockito:mockito-core:5.11.0")
+    androidTestImplementation("org.mockito:mockito-android:5.11.0")
 }

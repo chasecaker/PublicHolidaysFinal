@@ -4,9 +4,23 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CachedHolidayDao {
+
+    @Query(
+        """
+        SELECT * FROM cached_holidays
+        WHERE countryCode = :countryCode
+        AND year = :year
+        ORDER BY date ASC
+        """
+    )
+    fun observeCachedHolidays(
+        countryCode: String,
+        year: Int
+    ): Flow<List<CachedHolidayEntity>>
 
     @Query(
         """

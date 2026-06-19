@@ -17,7 +17,6 @@ class HolidaysViewModel @Inject constructor(
     private val repository: HolidaysRepository
 ) : ViewModel() {
 
-    private val _holidays = MutableStateFlow<List<PublicHolidayDto>>(emptyList())
     private val _isLoading = MutableStateFlow(false)
     private val _errorMessage = MutableStateFlow<String?>(null)
 
@@ -25,6 +24,13 @@ class HolidaysViewModel @Inject constructor(
     val query: StateFlow<String> = _query.asStateFlow()
 
     private val _searchParams = MutableStateFlow(Pair(2026, "RU"))
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val _holidays: StateFlow<List<PublicHolidayDto>> = _searchParams
+        .flatMapLatest { (year, countryCode) ->
+            repository.observeHolidays(year, countryCode)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val favoriteIds: StateFlow<Set<String>> = repository.currentUserId
@@ -62,8 +68,12 @@ class HolidaysViewModel @Inject constructor(
                     val allUsers = repository.getAllUsers().first()
                     val currentUser = allUsers.find { it.userId == userId }
                     currentUser?.let {
-                        _searchParams.value = Pair(2026, it.defaultCountryCode)
                         loadHolidays(2026, it.defaultCountryCode)
+                    }
+                } else {
+                   try {
+                       } catch (e: Exception) {
+                        _errorMessage.value = "Ошибка инициализации профиля: ${e.localizedMessage}"
                     }
                 }
             }
@@ -80,21 +90,25 @@ class HolidaysViewModel @Inject constructor(
         loadHolidays(params.first, params.second, forceRefresh = true)
     }
 
+
     fun loadHolidays(year: Int, countryCode: String, forceRefresh: Boolean = false) {
         _searchParams.value = Pair(year, countryCode)
+
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             try {
-                val result = repository.getHolidays(year, countryCode, forceRefresh)
-                _holidays.value = result
+                repository.syncHolidays(year, countryCode, forceRefresh)
             } catch (e: Exception) {
-                _errorMessage.value = e.localizedMessage ?: "Ошибка загрузки данных"
+                if (_holidays.value.isEmpty()) {
+                    _errorMessage.value = e.localizedMessage ?: "Ошибка загрузки данных"
+                }
             } finally {
                 _isLoading.value = false
             }
         }
     }
+
 
     fun onSearchQueryChange(newQuery: String) {
         _query.value = newQuery
@@ -103,15 +117,27 @@ class HolidaysViewModel @Inject constructor(
     fun toggleFavorite(holidayId: String) {
         viewModelScope.launch {
             val userId = repository.currentUserId.first()
+            if (userId == null) {
+                _errorMessage.value = "Не удалось определить текущий профиль пользователя"
+                return@launch
+            }
+
             val holidayDto = _holidays.value.find {
                 "${it.date}|${it.countryCode}|${it.name}" == holidayId
             }
+            if (holidayDto == null) {
+                _errorMessage.value = "Не удалось найти выбранный праздник в списке"
+                return@launch
+            }
 
-            if (userId != null && holidayDto != null) {
+            try {
                 repository.toggleFavorite(userId, holidayDto)
+            } catch (e: Exception) {
+                _errorMessage.value = e.localizedMessage ?: "Не удалось обновить избранное"
             }
         }
     }
+
 
     private fun PublicHolidayDto.toUi() = HolidayUi(
         id = "$date|$countryCode|$name",

@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.first
 import ru.fefu.publicholidays.data.local.CachedHolidayDao
 import ru.fefu.publicholidays.data.local.CachedHolidayEntity
 import ru.fefu.publicholidays.data.local.UserDao
-import ru.fefu.publicholidays.data.local.UserSettingsManager
 import ru.fefu.publicholidays.data.model.PublicHolidayDto
 import ru.fefu.publicholidays.data.remote.HolidaysApi
 import java.time.Year
@@ -23,14 +22,13 @@ class HolidaySyncWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val api: HolidaysApi,
     private val userDao: UserDao,
-    private val cachedHolidayDao: CachedHolidayDao,
-    private val userSettingsManager: UserSettingsManager
+    private val cachedHolidayDao: CachedHolidayDao
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
         return try {
             deleteExpiredCache()
-            syncCurrentUserCountry()
+            syncAllUserCountries()
             Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Holiday sync failed", e)
@@ -43,25 +41,29 @@ class HolidaySyncWorker @AssistedInject constructor(
         cachedHolidayDao.deleteExpiredCache(expirationTime)
     }
 
-    private suspend fun syncCurrentUserCountry() {
-        val currentUserId = userSettingsManager.currentUserId.first()
-        val countryCode = if (currentUserId != null) {
-            userDao.getUserById(currentUserId)?.defaultCountryCode ?: DEFAULT_COUNTRY
+    private suspend fun syncAllUserCountries() {
+        val allUsers = userDao.getAllUsers().first()
+
+        val countryCodes = allUsers.map { it.defaultCountryCode }.distinct()
+
+        val targetCountries = if (countryCodes.isEmpty()) {
+            listOf(DEFAULT_COUNTRY)
         } else {
-            DEFAULT_COUNTRY
+            countryCodes
         }
 
         val currentYear = Year.now().value
 
-        syncYear(
-            countryCode = countryCode,
-            year = currentYear
-        )
-
-        syncYear(
-            countryCode = countryCode,
-            year = currentYear + 1
-        )
+        targetCountries.forEach { countryCode ->
+            syncYear(
+                countryCode = countryCode,
+                year = currentYear
+            )
+            syncYear(
+                countryCode = countryCode,
+                year = currentYear + 1
+            )
+        }
     }
 
     private suspend fun syncYear(
@@ -103,6 +105,9 @@ class HolidaySyncWorker @AssistedInject constructor(
             year = year,
             fixed = fixed,
             global = global,
+            counties = counties,
+            launchYear = launchYear,
+            types = types,
             cachedAt = cachedAt
         )
     }

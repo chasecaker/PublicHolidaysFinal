@@ -7,24 +7,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import ru.fefu.publicholidays.ui.viewmodel.HistoryViewModel
+import ru.fefu.publicholidays.ui.state.HistoryUiState
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.runtime.remember
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen(
+    uiState: HistoryUiState,
     onBackClick: () -> Unit,
-    viewModel: HistoryViewModel = viewModel()
+    onClearHistoryClick: () -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val dateFormatter = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+    val dateFormatter = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
 
     Scaffold(
         topBar = {
@@ -40,7 +39,7 @@ fun HistoryScreen(
                 },
                 actions = {
                     if (uiState.historyItems.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.clearHistory() }) {
+                        TextButton(onClick = onClearHistoryClick) {
                             Text("Очистить", color = MaterialTheme.colorScheme.error)
                         }
                     }
@@ -68,7 +67,10 @@ fun HistoryScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(uiState.historyItems) { entry ->
+                    items(
+                        items = uiState.historyItems,
+                        key = { entry -> entry.id }
+                    ) { entry ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)

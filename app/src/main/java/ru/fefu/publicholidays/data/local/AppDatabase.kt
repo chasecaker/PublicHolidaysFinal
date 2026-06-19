@@ -2,6 +2,7 @@ package ru.fefu.publicholidays.data.local
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 
 @Database(
     entities = [
@@ -11,9 +12,10 @@ import androidx.room.RoomDatabase
         HolidayNoteEntity::class,
         CachedHolidayEntity::class
     ],
-    version = 5,
+    version = 7,
     exportSchema = false
 )
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteHolidayDao(): FavoriteHolidayDao
     abstract fun userDao(): UserDao

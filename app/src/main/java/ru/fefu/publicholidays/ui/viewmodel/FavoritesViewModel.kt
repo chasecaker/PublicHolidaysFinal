@@ -59,25 +59,17 @@ class FavoritesViewModel @Inject constructor(
     fun removeFromFavorites(holiday: HolidayUi) {
         viewModelScope.launch {
             val userId = repository.currentUserId.first() ?: return@launch
-
-            repository.toggleFavorite(
-                userId = userId,
-                holiday = holiday.toDto()
-            )
+            repository.toggleFavorite(userId = userId, holiday = holiday.toDto())
         }
     }
 
-    fun updateFavoriteNote(
-        holiday: HolidayUi,
-        note: String
-    ) {
+    fun updateFavoriteNote(holiday: HolidayUi, note: String) {
         viewModelScope.launch {
             val userId = repository.currentUserId.first() ?: return@launch
 
             repository.saveNote(
                 userId = userId,
-                holidayDate = holiday.date,
-                countryCode = holiday.countryCode,
+                holidayId = holiday.id,
                 text = note
             )
         }
@@ -87,7 +79,7 @@ class FavoritesViewModel @Inject constructor(
         notes: List<HolidayNoteEntity>
     ): HolidayUi {
         val linkedNote = notes.firstOrNull { note ->
-            note.holidayDate == date && note.countryCode == countryCode
+            note.holidayId == favoriteId
         }
 
         return HolidayUi(
@@ -98,7 +90,7 @@ class FavoritesViewModel @Inject constructor(
             countryCode = countryCode,
             fixed = fixed,
             global = global,
-            types = emptyList(),
+            types = types,
             favoriteNote = linkedNote?.noteText.orEmpty()
         )
     }
