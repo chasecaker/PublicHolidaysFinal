@@ -35,9 +35,7 @@ class HolidaySyncWorkerTest {
         database = Room.inMemoryDatabaseBuilder(
             context,
             AppDatabase::class.java
-        )
-            .allowMainThreadQueries()
-            .build()
+        ).allowMainThreadQueries().build()
 
         api = FakeHolidaysApi()
         userSettingsManager = UserSettingsManager(context)
@@ -49,13 +47,12 @@ class HolidaySyncWorkerTest {
     }
 
     @Test
-    fun doWork_whenApiReturnsHolidays_cachesCurrentAndNextYear() = runBlocking {
+    fun holidaySyncWorker_correctlySyncsHolidays() = runBlocking {
         val user = UserEntity(
-            userId = "user-1",
+            userId = "test_user",
             name = "Test User",
             defaultCountryCode = "RU"
         )
-
         database.userDao().insertUser(user)
         userSettingsManager.setCurrentUserId(user.userId)
 
@@ -78,8 +75,7 @@ class HolidaySyncWorkerTest {
                 TestHolidaySyncWorkerFactory(
                     api = api,
                     userDao = database.userDao(),
-                    cachedHolidayDao = database.cachedHolidayDao(),
-                    userSettingsManager = userSettingsManager
+                    cachedHolidayDao = database.cachedHolidayDao()
                 )
             )
             .build()

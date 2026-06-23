@@ -2,6 +2,7 @@ package ru.fefu.publicholidays.data.repository
 
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import ru.fefu.publicholidays.data.local.CachedHolidayDao
 import ru.fefu.publicholidays.data.local.CachedHolidayEntity
@@ -19,8 +20,6 @@ import ru.fefu.publicholidays.data.remote.HolidaysApi
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.onEach
 import java.util.UUID
 
 @Singleton
@@ -40,23 +39,7 @@ class HolidaysRepository @Inject constructor(
     }
 
     val currentUserId: Flow<String?> = userSettingsManager.currentUserId
-        .onEach { userId ->
-            if (userId == null) {
-                val users = userDao.getAllUsers().first()
-                if (users.isEmpty()) {
-                    val defaultUserId = UUID.randomUUID().toString()
-                    val defaultUser = UserEntity(
-                        userId = defaultUserId,
-                        name = "Основной профиль",
-                        defaultCountryCode = "RU"
-                    )
-                    userDao.insertUser(defaultUser)
-                    userSettingsManager.setCurrentUserId(defaultUserId)
-                } else {
-                    userSettingsManager.setCurrentUserId(users.first().userId)
-                }
-            }
-        }
+
     val isDarkThemeEnabled: Flow<Boolean> = userSettingsManager.isDarkThemeEnabled
 
     suspend fun switchUser(userId: String?) {
@@ -77,8 +60,8 @@ class HolidaysRepository @Inject constructor(
         holidayNoteDao.deleteAllNotesByUser(userId)
         userDao.deleteUser(userId)
 
-        if (currentUserId.first() == userId) {
-            val nextUser = userDao.getAllUsers().first().firstOrNull()
+        if (currentUserId.firstOrNull() == userId) {
+            val nextUser = userDao.getAllUsers().firstOrNull()?.firstOrNull()
             switchUser(nextUser?.userId)
         }
     }
@@ -104,29 +87,29 @@ class HolidaysRepository @Inject constructor(
 
         try {
             val remote = api.getPublicHolidays(year, countryCode)
+            val now = System.currentTimeMillis()
+            val entities = remote.map { dto ->
+                CachedHolidayEntity(
+                    holidayId = dto.toHolidayId(),
+                    date = dto.date,
+                    localName = dto.localName,
+                    name = dto.name,
+                    countryCode = dto.countryCode,
+                    year = year,
+                    fixed = dto.fixed,
+                    global = dto.global,
+                    counties = dto.counties,
+                    launchYear = dto.launchYear,
+                    types = dto.types,
+                    cachedAt = now
+                )
+            }
 
-            if (remote.isNotEmpty()) {
-                val now = System.currentTimeMillis()
-                val entities = remote.map { dto ->
-                    CachedHolidayEntity(
-                        holidayId = dto.toHolidayId(),
-                        date = dto.date,
-                        localName = dto.localName,
-                        name = dto.name,
-                        countryCode = dto.countryCode,
-                        year = year,
-                        fixed = dto.fixed,
-                        global = dto.global,
-                        counties = dto.counties,
-                        launchYear = dto.launchYear,
-                        types = dto.types,
-                        cachedAt = now
-                    )
-                }
-
-                cachedHolidayDao.clearCache(countryCode, year)
+            cachedHolidayDao.clearCache(countryCode, year)
+            if (entities.isNotEmpty()) {
                 cachedHolidayDao.insertCachedHolidays(entities)
             }
+
         } catch (e: Exception) {
             if (cached.isEmpty()) {
                 throw e
@@ -140,13 +123,16 @@ class HolidaysRepository @Inject constructor(
         holidayDate: String,
         name: String
     ): PublicHolidayDto? {
-        val cached = cachedHolidayDao.getCachedHoliday(countryCode, year, holidayDate, name)
-        if (cached != null) return cached.toCachedDto()
+        val localHoliday = cachedHolidayDao.getCachedHoliday(countryCode, year, holidayDate, name)
 
-        try {
-            syncHolidays(year, countryCode, forceRefresh = false)
-        } catch (e: Exception) {
-            Log.w("HolidaysRepository", "Не удалось выполнить фоновую синхронизацию праздников", e)
+        if (localHoliday == null || !isCacheFresh(countryCode, year)) {
+            try {
+                syncHolidays(year, countryCode, forceRefresh = false)
+            } catch (e: Exception) {
+                Log.w("HolidaysRepository", "Не удалось обновить кэш для деталей праздника", e)
+                localHoliday?.let { return it.toCachedDto() }
+                throw e
+            }
         }
 
         return cachedHolidayDao.getCachedHoliday(countryCode, year, holidayDate, name)?.toCachedDto()
@@ -239,4 +225,17 @@ class HolidaysRepository @Inject constructor(
         countryCode = countryCode, fixed = fixed, global = global,
         counties = counties, launchYear = launchYear, types = types
     )
+
+    suspend fun initializeDefaultUserIfNeeded() {
+        val users = userDao.getAllUsers().firstOrNull()?.firstOrNull()
+        if (users == null) {
+            val defaultUser = UserEntity(
+                userId = UUID.randomUUID().toString(),
+                name = "Основной профиль",
+                defaultCountryCode = "RU"
+            )
+            userDao.insertUser(defaultUser)
+            userSettingsManager.setCurrentUserId(defaultUser.userId)
+        }
+    }
 }

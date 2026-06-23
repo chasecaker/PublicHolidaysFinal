@@ -33,6 +33,21 @@ class HolidaysRepositoryRoomTest {
     private val mockApi: HolidaysApi = mock(HolidaysApi::class.java)
     private lateinit var userSettingsManager: UserSettingsManager
 
+    private val testUserId = "test_user_id"
+    private val testUser = UserEntity(testUserId, "Тестовый Профиль", "RU")
+    private val holidayId = "2026-05-01|RU|Labour Day"
+    private val testHoliday = PublicHolidayDto(
+        date = "2026-05-01",
+        localName = "Праздник Весны и Труда",
+        name = "Labour Day",
+        countryCode = "RU",
+        fixed = true,
+        global = true,
+        counties = null,
+        launchYear = null,
+        types = listOf("Public")
+    )
+
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -91,43 +106,41 @@ class HolidaysRepositoryRoomTest {
     }
 
     @Test
-    fun testFavoritesAndHistoryOperations() = runBlocking {
-        val userId = "test_user_id"
-        val user = UserEntity(userId, "Тестовый Профиль", "RU")
-        repository.createUser(user)
+    fun testToggleFavoriteAddsAndRemovesFavoriteCorrectly() = runBlocking {
+        repository.createUser(testUser)
 
-        val holiday = PublicHolidayDto(
-            date = "2026-05-01",
-            localName = "Праздник Весны и Труда",
-            name = "Labour Day",
-            countryCode = "RU",
-            fixed = true,
-            global = true,
-            counties = null,
-            launchYear = null,
-            types = listOf("Public")
-        )
-        val holidayId = "2026-05-01|RU|Labour Day"
+        repository.toggleFavorite(testUserId, testHoliday)
+        var favoriteIds = repository.getFavoriteIds(testUserId).first()
+        assertTrue("Праздник должен добавиться в избранное", favoriteIds.contains(holidayId))
 
-        repository.toggleFavorite(userId, holiday)
-        var favoriteIds = repository.getFavoriteIds(userId).first()
-        assertTrue(favoriteIds.contains(holidayId))
+        repository.toggleFavorite(testUserId, testHoliday)
+        favoriteIds = repository.getFavoriteIds(testUserId).first()
+        assertFalse("Праздник должен удалиться из избранного", favoriteIds.contains(holidayId))
+    }
 
-        repository.toggleFavorite(userId, holiday)
-        favoriteIds = repository.getFavoriteIds(userId).first()
-        assertFalse(favoriteIds.contains(holidayId))
+    @Test
+    fun testAddHistoryEntryInsertsCorrectData() = runBlocking {
+        repository.createUser(testUser)
 
-        repository.addHistoryEntry(userId, holiday)
-        val history = repository.getHistory(userId).first()
-        assertEquals(1, history.size)
+        repository.addHistoryEntry(testUserId, testHoliday)
+        val history = repository.getHistory(testUserId).first()
+
+        assertEquals("В истории должен быть ровно один элемент", 1, history.size)
 
         val firstHistoryItem = history[0]
         val currentHistoryId = "${firstHistoryItem.date}|${firstHistoryItem.countryCode}|${firstHistoryItem.name}"
-        assertEquals(holidayId, currentHistoryId)
+        assertEquals("ID элемента истории должен совпадать с исходным праздником", holidayId, currentHistoryId)
+    }
 
-        repository.saveNote(userId = userId, holidayId = holidayId, text = "Важная заметка")
-        val note = repository.getNote(userId, holidayId).first()
-        assertNotNull(note)
-        assertEquals("Важная заметка", note?.noteText)
+    @Test
+    fun testSaveAndGetHolidayNote() = runBlocking {
+        repository.createUser(testUser)
+        val expectedNoteText = "Важная заметка"
+
+        repository.saveNote(userId = testUserId, holidayId = holidayId, text = expectedNoteText)
+        val note = repository.getNote(testUserId, holidayId).first()
+
+        assertNotNull("Заметка не должна быть null после сохранения", note)
+        assertEquals("Текст сохраненной заметки не совпадает", expectedNoteText, note?.noteText)
     }
 }

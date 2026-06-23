@@ -25,9 +25,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import ru.fefu.publicholidays.ui.model.HolidayUi
 import ru.fefu.publicholidays.ui.state.FavouriteHolidaysUiState
 
@@ -88,63 +95,91 @@ fun FavouritesScreen(
                             items = state.data,
                             key = { it.id }
                         ) { holiday ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = { onItemClick(holiday.id) }
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = holiday.name,
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
-                                            Text(
-                                                text = holiday.localName,
-                                                style = MaterialTheme.typography.bodyMedium
-                                            )
-                                            Text(
-                                                text = "${holiday.date} · ${holiday.countryCode}",
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-
-                                        IconButton(
-                                            onClick = { onRemoveFavourite(holiday) }
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Star,
-                                                contentDescription = "Удалить из избранного",
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-
-                                    OutlinedTextField(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        value = holiday.favoriteNote,
-                                        onValueChange = { text ->
-                                            onFavoriteNoteChange(holiday, text)
-                                        },
-                                        label = { Text("Личная пометка") },
-                                        placeholder = { Text("Например: купить подарок") },
-                                        minLines = 1,
-                                        maxLines = 3
-                                    )
-                                }
-                            }
+                            FavoriteHolidayItem(
+                                holiday = holiday,
+                                onClick = { onItemClick(holiday.id) },
+                                onRemoveFavourite = { onRemoveFavourite(holiday) },
+                                onNoteSave = { updatedText -> onFavoriteNoteChange(holiday, updatedText) }
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun FavoriteHolidayItem(
+    holiday: HolidayUi,
+    onClick: () -> Unit,
+    onRemoveFavourite: () -> Unit,
+    onNoteSave: (String) -> Unit
+) {
+    var localNoteText by remember(holiday.id) { mutableStateOf(holiday.favoriteNote) }
+
+    LaunchedEffect(localNoteText) {
+        if (localNoteText == holiday.favoriteNote) return@LaunchedEffect
+
+        delay(600L)
+        onNoteSave(localNoteText)
+    }
+
+    DisposableEffect(holiday.id) {
+        onDispose {
+            if (localNoteText != holiday.favoriteNote) {
+                onNoteSave(localNoteText)
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = holiday.name,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = holiday.localName,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        text = "${holiday.date} · ${holiday.countryCode}",
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                IconButton(onClick = onRemoveFavourite) {
+                    Icon(
+                        imageVector = Icons.Filled.Star,
+                        contentDescription = "Удалить из избранного",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                value = localNoteText,
+                onValueChange = { localNoteText = it },
+                label = { Text("Личная пометка") },
+                placeholder = { Text("Например: купить подарок") },
+                minLines = 1,
+                maxLines = 3
+            )
         }
     }
 }

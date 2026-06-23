@@ -7,7 +7,8 @@ sealed class HolidaysUiState {
 
     data class Success(
         val data: List<HolidayUi>,
-        val favourites: Set<String>
+        val favourites: Set<String>,
+        val isRefreshing: Boolean = false
     ) : HolidaysUiState()
 
     data class Error(val message: String) : HolidaysUiState()

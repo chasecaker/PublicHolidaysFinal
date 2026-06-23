@@ -99,10 +99,17 @@ fun HolidaysNavGraph() {
 
         composable(Routes.SETTINGS) {
             val settingsViewModel: SettingsViewModel = hiltViewModel()
+            val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
             SettingsScreen(
+                uiState = settingsState,
                 onBackClick = { navController.popBackStack() },
-                viewModel = settingsViewModel
+                onToggleTheme = { settingsViewModel.toggleTheme(it) },
+                onNameChange = { settingsViewModel.onNameChange(it) },
+                onCountryChange = { settingsViewModel.onCountryChange(it) },
+                onCreateUser = { settingsViewModel.createUser() },
+                onSelectUser = { settingsViewModel.selectUser(it) },
+                onDeleteUser = { settingsViewModel.deleteUser(it) }
             )
         }
     }

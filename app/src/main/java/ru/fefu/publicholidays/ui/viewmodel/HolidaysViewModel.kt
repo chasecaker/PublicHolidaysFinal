@@ -47,8 +47,8 @@ class HolidaysViewModel @Inject constructor(
         favoriteIds
     ) { holidays, isLoading, error, searchQuery, favIds ->
         when {
-            isLoading -> HolidaysUiState.Loading
-            error != null -> HolidaysUiState.Error(error)
+            error != null && holidays.isEmpty() -> HolidaysUiState.Error(error)
+            isLoading && holidays.isEmpty() -> HolidaysUiState.Loading
             holidays.isEmpty() -> HolidaysUiState.Empty
             else -> {
                 val filtered = holidays.filter {
@@ -71,10 +71,7 @@ class HolidaysViewModel @Inject constructor(
                         loadHolidays(2026, it.defaultCountryCode)
                     }
                 } else {
-                   try {
-                       } catch (e: Exception) {
-                        _errorMessage.value = "Ошибка инициализации профиля: ${e.localizedMessage}"
-                    }
+                    _errorMessage.value = "Ошибка инициализации профиля: пользователь не авторизован"
                 }
             }
         }

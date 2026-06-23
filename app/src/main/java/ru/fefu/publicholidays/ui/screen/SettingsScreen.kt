@@ -9,23 +9,24 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import ru.fefu.publicholidays.ui.viewmodel.SettingsViewModel
 import androidx.compose.material3.TextButton
+import ru.fefu.publicholidays.ui.state.SettingsUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    uiState: SettingsUiState,
     onBackClick: () -> Unit,
-    viewModel: SettingsViewModel = viewModel()
+    onToggleTheme: (Boolean) -> Unit,
+    onNameChange: (String) -> Unit,
+    onCountryChange: (String) -> Unit,
+    onCreateUser: () -> Unit,
+    onSelectUser: (String) -> Unit,
+    onDeleteUser: (String) -> Unit
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -60,7 +61,7 @@ fun SettingsScreen(
                     Text(text = "Тёмная тема")
                     Switch(
                         checked = uiState.isDarkTheme,
-                        onCheckedChange = { viewModel.toggleTheme(it) }
+                        onCheckedChange = onToggleTheme
                     )
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -71,20 +72,20 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = uiState.newUserName,
-                    onValueChange = { viewModel.onNameChange(it) },
+                    onValueChange = onNameChange,
                     label = { Text("Имя пользователя") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = uiState.newUserCountry,
-                    onValueChange = { viewModel.onCountryChange(it) },
+                    onValueChange = onCountryChange,
                     label = { Text("Код страны по умолчанию (например, RU, US)") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
-                    onClick = { viewModel.createUser() },
+                    onClick = onCreateUser,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Добавить профиль")
@@ -96,12 +97,15 @@ fun SettingsScreen(
                 Text(text = "Выберите активный профиль", style = MaterialTheme.typography.titleMedium)
             }
 
-            items(uiState.users) { user ->
+            items(
+                items = uiState.users,
+                key = { user -> user.userId }
+            ) { user ->
                 val isSelected = user.userId == uiState.currentUserId
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.selectUser(user.userId) },
+                        .clickable { onSelectUser(user.userId) },
                     colors = CardDefaults.cardColors(
                         containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
                     )
@@ -141,9 +145,7 @@ fun SettingsScreen(
 
                             TextButton(
                                 enabled = uiState.users.size > 1,
-                                onClick = {
-                                    viewModel.deleteUser(user.userId)
-                                }
+                                onClick = { onDeleteUser(user.userId) }
                             ) {
                                 Text("Удалить")
                             }
